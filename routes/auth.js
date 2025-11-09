@@ -1,7 +1,9 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
 import User from '../models/User.js';
+import VerificationToken from '../models/VerificationToken.js';
 import { generateToken, protect } from '../middleware/auth.js';
+import { generateVerificationToken, sendVerificationEmail } from '../utils/emailService.js';
 
 const router = express.Router();
 
@@ -62,17 +64,37 @@ router.post('/register', [
     const user = await User.create({
       username,
       email,
-      password
+      password,
+      isEmailVerified: false
     });
 
     if (user) {
+      // Generate verification token
+      const token = generateVerificationToken();
+      
+      // Save verification token
+      await VerificationToken.create({
+        userId: user._id,
+        token
+      });
+
+      // Send verification email
+      try {
+        await sendVerificationEmail(email, username, token);
+      } catch (emailError) {
+        console.error('Failed to send verification email:', emailError);
+        // Continue with registration even if email fails
+      }
+
       res.status(201).json({
         _id: user._id,
         username: user.username,
         email: user.email,
         rating: user.rating,
         isAdmin: user.isAdmin,
-        token: generateToken(user._id)
+        isEmailVerified: user.isEmailVerified,
+        token: generateToken(user._id),
+        message: 'Registration successful! Please check your email to verify your account.'
       });
     }
   } catch (error) {
@@ -108,6 +130,15 @@ router.post('/login', [
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
+    // Check email verification
+    if (!user.isEmailVerified) {
+      return res.status(403).json({ 
+        message: 'Please verify your email before logging in. Check your inbox for verification link.',
+        emailNotVerified: true,
+        email: user.email
+      });
+    }
+
     // Update online status
     user.isOnline = true;
     user.lastSeen = new Date();
@@ -123,6 +154,7 @@ router.post('/login', [
       draws: user.draws,
       totalMatches: user.totalMatches,
       isAdmin: user.isAdmin,
+      isEmailVerified: user.isEmailVerified,
       token: generateToken(user._id)
     });
   } catch (error) {

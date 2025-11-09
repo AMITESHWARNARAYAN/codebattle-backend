@@ -22,6 +22,10 @@ const userSchema = new mongoose.Schema({
     required: true,
     minlength: 6
   },
+  isEmailVerified: {
+    type: Boolean,
+    default: false
+  },
   bio: {
     type: String,
     default: '',
