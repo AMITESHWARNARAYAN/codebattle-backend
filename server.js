@@ -21,12 +21,14 @@ if (result.error) {
 }
 
 // Log critical environment variables status
+console.log('='.repeat(50));
 console.log('Environment Check:');
 console.log('- GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? '✅ Set' : '❌ Not set');
 console.log('- GROQ_API_KEY:', process.env.GROQ_API_KEY ? '✅ Set' : '❌ Not set');
 console.log('- SENDGRID_API_KEY:', process.env.SENDGRID_API_KEY ? '✅ Set' : '❌ Not set');
 console.log('- MONGODB_URI:', process.env.MONGODB_URI ? '✅ Set' : '❌ Not set');
 console.log('- JWT_SECRET:', process.env.JWT_SECRET ? '✅ Set' : '❌ Not set');
+console.log('='.repeat(50));
 
 const app = express();
 const httpServer = createServer(app);
@@ -104,6 +106,8 @@ async function setupRoutes() {
   const { default: notificationRoutesModule } = await import('./routes/notifications.js');
   const { default: judgeRoutesModule } = await import('./routes/judge.js');
   const { default: verificationRoutesModule } = await import('./routes/verification.js');
+  const { default: testEmailRoutesModule } = await import('./routes/test-email.js');
+  const { default: resourceRoutesModule } = await import('./routes/resources.js');
 
   // Setup WebSocket
   setupMatchmakingModule(io);
@@ -111,6 +115,7 @@ async function setupRoutes() {
   // Routes
   app.use('/api/auth', authRoutesModule);
   app.use('/api/verification', verificationRoutesModule);
+  app.use('/api/test-email', testEmailRoutesModule); // Test email endpoint
   app.use('/api/problems', problemRoutesModule);
   app.use('/api/matches', matchRoutesModule);
   app.use('/api/users', userRoutesModule);
@@ -126,6 +131,7 @@ async function setupRoutes() {
   app.use('/api/admin/contests', adminContestRoutesModule);
   app.use('/api/notifications', notificationRoutesModule);
   app.use('/api/judge', judgeRoutesModule);
+  app.use('/api/resources', resourceRoutesModule);
 
   const { default: problemMetadataRoutesModule } = await import('./routes/problemMetadata.js');
   app.use('/api/problem-metadata', problemMetadataRoutesModule);

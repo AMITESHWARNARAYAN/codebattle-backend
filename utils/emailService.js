@@ -1,16 +1,26 @@
 import nodemailer from 'nodemailer';
 import crypto from 'crypto';
 
-// Create reusable transporter with SendGrid SMTP
+// Create reusable transporter with SendGrid SMTP - optimized for Render
 const createTransporter = () => {
   return nodemailer.createTransport({
     host: 'smtp.sendgrid.net',
-    port: 587,
-    secure: false, // Use STARTTLS
+    port: 465, // Use SSL instead of TLS for better compatibility
+    secure: true, // Use SSL
     auth: {
       user: 'apikey', // This is literally the string 'apikey'
       pass: process.env.SENDGRID_API_KEY // Your SendGrid API key
-    }
+    },
+    pool: true, // Use connection pooling
+    maxConnections: 5,
+    maxMessages: 10,
+    rateDelta: 1000,
+    rateLimit: 5,
+    connectionTimeout: 15000, // 15 seconds
+    greetingTimeout: 15000,
+    socketTimeout: 45000, // 45 seconds
+    logger: true, // Enable logging for debugging
+    debug: false // Disable detailed debug logs
   });
 };
 
@@ -162,14 +172,33 @@ export const sendVerificationEmail = async (email, username, token) => {
     `
   };
 
-  try {
-    await transporter.sendMail(mailOptions);
-    console.log('✅ Verification email sent to:', email);
-    return true;
-  } catch (error) {
-    console.error('❌ Error sending verification email:', error);
-    throw new Error('Failed to send verification email');
+  // Retry logic for connection timeouts
+  const maxRetries = 3;
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`📧 Attempt ${attempt}/${maxRetries} - Sending verification email to: ${email}`);
+      const info = await transporter.sendMail(mailOptions);
+      console.log('✅ Verification email sent successfully!');
+      console.log('Message ID:', info.messageId);
+      return true;
+    } catch (error) {
+      lastError = error;
+      console.error(`❌ Attempt ${attempt}/${maxRetries} failed:`, error.message);
+      
+      // Wait before retry (exponential backoff)
+      if (attempt < maxRetries) {
+        const waitTime = attempt * 2000; // 2s, 4s
+        console.log(`⏳ Waiting ${waitTime}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
   }
+  
+  // All retries failed
+  console.error('❌ All email sending attempts failed:', lastError.message);
+  throw new Error('Failed to send verification email after multiple attempts');
 };
 
 // Send welcome email after verification
@@ -278,15 +307,30 @@ export const sendWelcomeEmail = async (email, username) => {
     `
   };
 
-  try {
-    await transporter.sendMail(mailOptions);
-    console.log('✅ Welcome email sent to:', email);
-    return true;
-  } catch (error) {
-    console.error('❌ Error sending welcome email:', error);
-    // Don't throw error for welcome email failure
-    return false;
+  // Retry logic for connection timeouts
+  const maxRetries = 3;
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`📧 Attempt ${attempt}/${maxRetries} - Sending welcome email to: ${email}`);
+      const info = await transporter.sendMail(mailOptions);
+      console.log('✅ Welcome email sent successfully!');
+      return true;
+    } catch (error) {
+      lastError = error;
+      console.error(`❌ Attempt ${attempt}/${maxRetries} failed:`, error.message);
+      
+      if (attempt < maxRetries) {
+        const waitTime = attempt * 2000;
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
   }
+  
+  // Don't throw error for welcome email failure, just log it
+  console.error('❌ All welcome email attempts failed, but continuing...');
+  return false;
 };
 
 // Resend verification email

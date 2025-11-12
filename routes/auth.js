@@ -54,27 +54,10 @@ router.post('/register', [
       username,
       email,
       password,
-      isEmailVerified: false
+      isEmailVerified: true // Auto-verify for now, email verification disabled
     });
 
     if (user) {
-      // Generate verification token
-      const token = generateVerificationToken();
-      
-      // Save verification token
-      await VerificationToken.create({
-        userId: user._id,
-        token
-      });
-
-      // Send verification email
-      try {
-        await sendVerificationEmail(email, username, token);
-      } catch (emailError) {
-        console.error('Failed to send verification email:', emailError);
-        // Continue with registration even if email fails
-      }
-
       res.status(201).json({
         _id: user._id,
         username: user.username,
@@ -119,14 +102,7 @@ router.post('/login', [
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
-    // TEMPORARILY DISABLED: Email verification (testing production deployment)
-    // if (!user.isEmailVerified) {
-    //   return res.status(403).json({ 
-    //     message: 'Please verify your email before logging in. Check your inbox for verification link.',
-    //     emailNotVerified: true,
-    //     email: user.email
-    //   });
-    // }
+    // Email verification disabled - users can login without verification
 
     // Update online status
     user.isOnline = true;

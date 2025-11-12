@@ -85,11 +85,11 @@ router.post('/submit', protect, async (req, res) => {
 });
 
 // @route   POST /api/judge/run
-// @desc    Run code with custom input (no test cases)
+// @desc    Run code with specific test case or custom input
 // @access  Private
 router.post('/run', protect, async (req, res) => {
   try {
-    const { code, language, input } = req.body;
+    const { code, language, input, problemId, testCaseIndex } = req.body;
 
     // Validate input
     if (!code || !code.trim()) {
@@ -100,26 +100,50 @@ router.post('/run', protect, async (req, res) => {
       return res.status(400).json({ message: 'Language is required' });
     }
 
-    // Create a single test case with custom input
-    const testCases = [{
-      input: input || '',
-      expectedOutput: '' // No expected output for custom run
-    }];
+    let testCases;
+    let timeLimit = 5; // Default 5 seconds
+
+    // If problemId and testCaseIndex provided, use specific test case
+    if (problemId && typeof testCaseIndex === 'number') {
+      const problem = await Problem.findById(problemId);
+      if (!problem) {
+        return res.status(404).json({ message: 'Problem not found' });
+      }
+
+      if (testCaseIndex >= 0 && testCaseIndex < problem.testCases.length) {
+        testCases = [problem.testCases[testCaseIndex]];
+        timeLimit = problem.timeLimit / 1000; // Convert ms to seconds
+      } else {
+        return res.status(400).json({ message: 'Invalid test case index' });
+      }
+    } else {
+      // Create a single test case with custom input
+      testCases = [{
+        input: input || '',
+        expectedOutput: '' // No expected output for custom run
+      }];
+    }
 
     // Execute code
     const executionResult = await executeCodeWithJudge0(
       code,
       testCases,
       language,
-      5 // 5 second timeout for custom runs
+      timeLimit
     );
 
+    const result = executionResult.outputs[0] || {};
+
     res.json({
-      output: executionResult.outputs[0]?.actualOutput || '',
+      output: result.actualOutput || '',
+      expectedOutput: testCases[0].expectedOutput || '',
       error: executionResult.errors[0] || '',
       executionTime: executionResult.executionTime,
       memoryUsed: executionResult.memoryUsed,
-      status: executionResult.status
+      status: executionResult.status,
+      passed: result.passed,
+      testCasesPassed: executionResult.testCasesPassed,
+      totalTestCases: executionResult.totalTestCases
     });
 
   } catch (error) {
