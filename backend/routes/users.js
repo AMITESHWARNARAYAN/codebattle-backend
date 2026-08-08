@@ -1,6 +1,6 @@
 import express from 'express';
 import User from '../models/User.js';
-import { protect, invalidateUserCache } from '../middleware/auth.js';
+import { protect, optionalAuth, invalidateUserCache } from '../middleware/auth.js';
 import bcrypt from 'bcryptjs';
 import Match from '../models/Match.js';
 
@@ -8,8 +8,8 @@ const router = express.Router();
 
 // @route   GET /api/users/leaderboard
 // @desc    Get top users by rating
-// @access  Private
-router.get('/leaderboard', protect, async (req, res) => {
+// @access  Public / Optional Auth
+router.get('/leaderboard', optionalAuth, async (req, res) => {
   try {
     let limit = parseInt(req.query.limit) || 100;
 
@@ -148,8 +148,8 @@ router.get('/search', protect, async (req, res) => {
 
 // @route   GET /api/users/:username
 // @desc    Get user profile by username
-// @access  Private
-router.get('/:username', protect, async (req, res) => {
+// @access  Public / Optional Auth
+router.get('/:username', optionalAuth, async (req, res) => {
   try {
     const user = await User.findOne({ username: req.params.username })
       .select('-password -email');

@@ -3,14 +3,14 @@ import DailyChallenge from '../models/DailyChallenge.js';
 import Problem from '../models/Problem.js';
 import User from '../models/User.js';
 import Submission from '../models/Submission.js';
-import { protect } from '../middleware/auth.js';
+import { protect, optionalAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // @route   GET /api/daily-challenge/today
 // @desc    Get today's daily challenge
-// @access  Private
-router.get('/today', protect, async (req, res) => {
+// @access  Public / Optional Auth
+router.get('/today', optionalAuth, async (req, res) => {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -44,20 +44,20 @@ router.get('/today', protect, async (req, res) => {
     }
 
     // Check if user has completed today's challenge
-    const userCompleted = dailyChallenge.participants.some(
+    const userCompleted = req.user ? dailyChallenge.participants.some(
       p => p.user.toString() === req.user._id.toString()
-    );
+    ) : false;
 
     // Get user's streak info
-    const user = await User.findById(req.user._id).select('currentStreak longestStreak lastDailyChallengeDate dailyChallengesCompleted');
+    const user = req.user ? await User.findById(req.user._id).select('currentStreak longestStreak lastDailyChallengeDate dailyChallengesCompleted') : null;
 
     res.json({
       challenge: dailyChallenge,
       userCompleted,
       userStreak: {
-        current: user.currentStreak,
-        longest: user.longestStreak,
-        totalCompleted: user.dailyChallengesCompleted
+        current: user?.currentStreak || 0,
+        longest: user?.longestStreak || 0,
+        totalCompleted: user?.dailyChallengesCompleted || 0
       }
     });
   } catch (error) {

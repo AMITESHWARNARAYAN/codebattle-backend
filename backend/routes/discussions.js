@@ -1,11 +1,11 @@
 import express from 'express';
 import Discussion from '../models/Discussion.js';
-import { protect } from '../middleware/auth.js';
+import { protect, optionalAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // Get all discussions for a problem
-router.get('/problem/:problemId', protect, async (req, res) => {
+router.get('/problem/:problemId', optionalAuth, async (req, res) => {
   try {
     const { problemId } = req.params;
     const { sortBy = 'recent', tag, search } = req.query;
@@ -41,12 +41,14 @@ router.get('/problem/:problemId', protect, async (req, res) => {
       .sort(sortOptions)
       .lean();
 
+    const userIdStr = req.user ? req.user._id.toString() : null;
+
     // Calculate vote counts
     const discussionsWithVotes = discussions.map(d => ({
       ...d,
       voteCount: d.upvotes.length - d.downvotes.length,
       commentCount: d.comments.length,
-      userVote: d.upvotes.includes(req.user._id) ? 'up' : d.downvotes.includes(req.user._id) ? 'down' : null
+      userVote: userIdStr ? (d.upvotes.some(u => u.toString() === userIdStr) ? 'up' : d.downvotes.some(u => u.toString() === userIdStr) ? 'down' : null) : null
     }));
 
     res.json(discussionsWithVotes);
@@ -102,7 +104,7 @@ router.get('/:id', protect, async (req, res) => {
     const discussionObj = discussion.toObject();
     discussionObj.voteCount = discussion.upvotes.length - discussion.downvotes.length;
     discussionObj.commentCount = discussion.comments.length;
-    discussionObj.userVote = discussion.upvotes.includes(req.user._id) ? 'up' : discussion.downvotes.includes(req.user._id) ? 'down' : null;
+    discussionObj.userVote = req.user ? (discussion.upvotes.some(u => u.toString() === req.user._id.toString()) ? 'up' : discussion.downvotes.some(u => u.toString() === req.user._id.toString()) ? 'down' : null) : null;
 
     res.json(discussionObj);
   } catch (error) {

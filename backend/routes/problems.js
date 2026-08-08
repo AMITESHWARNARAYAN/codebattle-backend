@@ -3,7 +3,7 @@ import express from 'express';
 import Problem from '../models/Problem.js';
 import Submission from '../models/Submission.js';
 import User from '../models/User.js';
-import { protect } from '../middleware/auth.js';
+import { optionalAuth, protect } from '../middleware/auth.js';
 import { resolveTestCases } from '../utils/testCaseFetcher.js';
 import { getRandomProblem } from '../utils/randomProblem.js';
 
@@ -11,8 +11,8 @@ const router = express.Router();
 
 // @route   GET /api/problems/:id/next
 // @desc    Get the next problem by creation order
-// @access  Private
-router.get('/:id/next', protect, async (req, res) => {
+// @access  Public / Optional Auth
+router.get('/:id/next', optionalAuth, async (req, res) => {
   try {
     const current = await Problem.findById(req.params.id);
     if (!current) return res.status(404).json({ message: 'Problem not found' });
@@ -30,8 +30,8 @@ router.get('/:id/next', protect, async (req, res) => {
 
 // @route   GET /api/problems/:id/previous
 // @desc    Get the previous problem by creation order
-// @access  Private
-router.get('/:id/previous', protect, async (req, res) => {
+// @access  Public / Optional Auth
+router.get('/:id/previous', optionalAuth, async (req, res) => {
   try {
     const current = await Problem.findById(req.params.id);
     if (!current) return res.status(404).json({ message: 'Problem not found' });
@@ -49,8 +49,8 @@ router.get('/:id/previous', protect, async (req, res) => {
 
 // @route   GET /api/problems
 // @desc    Get all problems with user solved status, filters, pagination
-// @access  Private
-router.get('/', protect, async (req, res) => {
+// @access  Public / Optional Auth
+router.get('/', optionalAuth, async (req, res) => {
   try {
     const { difficulty, tag, search, company, list, status, sort, page, limit: lim } = req.query;
     
@@ -66,8 +66,8 @@ router.get('/', protect, async (req, res) => {
     const pageSize = Math.min(parseInt(lim) || 50, 100);
     const skip = (pageNum - 1) * pageSize;
 
-    // Get user's solved problem IDs for status filtering
-    const user = await User.findById(req.user._id).select('solvedProblems');
+    // Get user's solved problem IDs for status filtering (if logged in)
+    const user = req.user ? await User.findById(req.user._id).select('solvedProblems') : null;
     const solvedIds = new Set((user?.solvedProblems || []).map(sp => sp.problem?.toString()));
 
     // Sorting
@@ -145,8 +145,8 @@ router.get('/', protect, async (req, res) => {
 
 // @route   GET /api/problems/random
 // @desc    Get a random problem for match
-// @access  Private
-router.get('/random', protect, async (req, res) => {
+// @access  Public / Optional Auth
+router.get('/random', optionalAuth, async (req, res) => {
   try {
     const { difficulty } = req.query;
     
@@ -175,8 +175,8 @@ router.get('/random', protect, async (req, res) => {
 
 // @route   GET /api/problems/:id
 // @desc    Get problem by ID
-// @access  Private
-router.get('/:id', protect, async (req, res) => {
+// @access  Public / Optional Auth
+router.get('/:id', optionalAuth, async (req, res) => {
   try {
     const problem = await Problem.findById(req.params.id).populate('category');
 
@@ -189,12 +189,12 @@ router.get('/:id', protect, async (req, res) => {
     await resolveTestCases(problemData);
     problemData.testCases = problemData.testCases.filter(tc => !tc.isHidden);
 
-    // Check if user has solved this problem
-    const acceptedSubmission = await Submission.findOne({
+    // Check if user has solved this problem (if logged in)
+    const acceptedSubmission = req.user ? await Submission.findOne({
       userId: req.user._id,
       problemId: req.params.id,
       status: 'Accepted'
-    });
+    }) : null;
 
     problemData.solved = !!acceptedSubmission;
 

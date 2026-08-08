@@ -1,72 +1,81 @@
 import express from 'express';
 import AdminChallenge from '../models/AdminChallenge.js';
 import Submission from '../models/Submission.js';
-import { protect } from '../middleware/auth.js';
+import { protect, optionalAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // @route   GET /api/challenges
-// @desc    Get all active challenges for current user
-// @access  Private
-router.get('/', protect, async (req, res) => {
+// @desc    Get all active challenges
+// @access  Public / Optional Auth
+router.get('/', optionalAuth, async (req, res) => {
   try {
     const now = new Date();
     
-    // Find challenges that are:
-    // 1. Active (within date range)
-    // 2. Visible
-    // 3. Either global OR targeted to this user
-    const challenges = await AdminChallenge.find({
+    const userId = req.user ? req.user._id : null;
+    const filter = {
       status: 'active',
       isVisible: true,
       startDate: { $lte: now },
       endDate: { $gt: now },
-      $or: [
+    };
+    if (userId) {
+      filter.$or = [
         { challengeType: 'global' },
-        { challengeType: 'targeted', targetUsers: req.user._id }
-      ]
-    })
+        { challengeType: 'targeted', targetUsers: userId }
+      ];
+    } else {
+      filter.challengeType = 'global';
+    }
+
+    const challenges = await AdminChallenge.find(filter)
       .populate('problem', 'title difficulty description')
       .populate('createdBy', 'username')
       .sort({ startDate: -1 });
 
-    // Add user's participation status to each challenge
     const challengesWithStatus = challenges.map(challenge => {
-      const participant = challenge.participants.find(
-        p => p.user.toString() === req.user._id.toString()
-      );
+      const participant = userId ? challenge.participants.find(
+        p => p.user.toString() === userId.toString()
+      ) : null;
       
       return {
         ...challenge.toObject(),
-        userStatus: participant ? participant.status : 'not-started',
-        userScore: participant ? participant.score : 0,
-        userCompletedAt: participant ? participant.completedAt : null
+        isParticipating: !!participant,
+        userStatus: participant ? participant.status : null,
+        userScore: participant ? participant.score : 0
       };
     });
 
     res.json(challengesWithStatus);
   } catch (error) {
-    console.error('Get challenges error:', error);
+    console.error('Get active challenges error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
 // @route   GET /api/challenges/upcoming
 // @desc    Get upcoming challenges
-// @access  Private
-router.get('/upcoming', protect, async (req, res) => {
+// @access  Public / Optional Auth
+router.get('/upcoming', optionalAuth, async (req, res) => {
   try {
     const now = new Date();
+    const userId = req.user ? req.user._id : null;
     
-    const challenges = await AdminChallenge.find({
+    const filter = {
       status: 'scheduled',
       isVisible: true,
-      startDate: { $gt: now },
-      $or: [
+      startDate: { $gt: now }
+    };
+    if (userId) {
+      filter.$or = [
         { challengeType: 'global' },
-        { challengeType: 'targeted', targetUsers: req.user._id }
-      ]
-    })
+        { challengeType: 'targeted', targetUsers: userId }
+      ];
+    } else {
+      filter.challengeType = 'global';
+    }
+
+    const challenges = await AdminChallenge.find(filter)
       .populate('problem', 'title difficulty')
       .populate('createdBy', 'username')
       .sort({ startDate: 1 })
@@ -81,9 +90,11 @@ router.get('/upcoming', protect, async (req, res) => {
 
 // @route   GET /api/challenges/completed
 // @desc    Get user's completed challenges
-// @access  Private
-router.get('/completed', protect, async (req, res) => {
+// @access  Public / Optional Auth
+router.get('/completed', optionalAuth, async (req, res) => {
   try {
+    if (!req.user) return res.json([]);
+
     const challenges = await AdminChallenge.find({
       'participants.user': req.user._id,
       'participants.status': 'completed'
@@ -92,7 +103,6 @@ router.get('/completed', protect, async (req, res) => {
       .populate('createdBy', 'username')
       .sort({ 'participants.completedAt': -1 });
 
-    // Filter to only show user's completed challenges
     const completedChallenges = challenges.map(challenge => {
       const participant = challenge.participants.find(
         p => p.user.toString() === req.user._id.toString() && p.status === 'completed'

@@ -2,7 +2,7 @@ import express from 'express';
 import Contest from '../models/Contest.js';
 import Problem from '../models/Problem.js';
 import User from '../models/User.js';
-import { protect } from '../middleware/auth.js';
+import { protect, optionalAuth } from '../middleware/auth.js';
 import { executeCode as executeCodeWithJudge0 } from '../utils/codeExecutor.js';
 import { resolveTestCases } from '../utils/testCaseFetcher.js';
 import { getDynamicKFactor } from '../utils/eloRating.js';
@@ -126,7 +126,7 @@ async function syncContestStatus(filter = {}) {
 // ──────────────────────────────────────────────────────
 // GET /  — All contests (with filters)
 // ──────────────────────────────────────────────────────
-router.get('/', protect, async (req, res) => {
+router.get('/', optionalAuth, async (req, res) => {
   try {
     await syncContestStatus();
     const { status, type } = req.query;
@@ -140,14 +140,16 @@ router.get('/', protect, async (req, res) => {
       .sort({ startTime: -1 })
       .lean();
 
+    const userId = req.user ? req.user._id.toString() : null;
+
     const contestsWithUserData = contests.map(contest => ({
       ...contest,
-      isRegistered: contest.participants.some(
-        p => p.user.toString() === req.user._id.toString()
-      ),
-      userRank: contest.participants.find(
-        p => p.user.toString() === req.user._id.toString()
-      )?.rank
+      isRegistered: userId ? contest.participants.some(
+        p => (p.user._id || p.user).toString() === userId
+      ) : false,
+      userRank: userId ? contest.participants.find(
+        p => (p.user._id || p.user).toString() === userId
+      )?.rank : null
     }));
 
     res.json(contestsWithUserData);
@@ -160,7 +162,7 @@ router.get('/', protect, async (req, res) => {
 // ──────────────────────────────────────────────────────
 // GET /upcoming
 // ──────────────────────────────────────────────────────
-router.get('/upcoming', protect, async (req, res) => {
+router.get('/upcoming', optionalAuth, async (req, res) => {
   try {
     await syncContestStatus();
     const contests = await Contest.find({ status: 'upcoming', isVisible: true })
@@ -168,9 +170,11 @@ router.get('/upcoming', protect, async (req, res) => {
       .sort({ startTime: 1 })
       .lean();
 
+    const userId = req.user ? req.user._id.toString() : null;
+
     const result = contests.map(c => ({
       ...c,
-      isRegistered: c.participants.some(p => p.user.toString() === req.user._id.toString())
+      isRegistered: userId ? c.participants.some(p => (p.user._id || p.user).toString() === userId) : false
     }));
 
     res.json(result);
@@ -183,7 +187,7 @@ router.get('/upcoming', protect, async (req, res) => {
 // ──────────────────────────────────────────────────────
 // GET /running
 // ──────────────────────────────────────────────────────
-router.get('/running', protect, async (req, res) => {
+router.get('/running', optionalAuth, async (req, res) => {
   try {
     await syncContestStatus();
     const contests = await Contest.find({ status: 'running', isVisible: true })
@@ -191,9 +195,11 @@ router.get('/running', protect, async (req, res) => {
       .sort({ startTime: -1 })
       .lean();
 
+    const userId = req.user ? req.user._id.toString() : null;
+
     const result = contests.map(c => ({
       ...c,
-      isRegistered: c.participants.some(p => p.user.toString() === req.user._id.toString())
+      isRegistered: userId ? c.participants.some(p => (p.user._id || p.user).toString() === userId) : false
     }));
 
     res.json(result);
@@ -206,7 +212,7 @@ router.get('/running', protect, async (req, res) => {
 // ──────────────────────────────────────────────────────
 // GET /past
 // ──────────────────────────────────────────────────────
-router.get('/past', protect, async (req, res) => {
+router.get('/past', optionalAuth, async (req, res) => {
   try {
     await syncContestStatus();
     const contests = await Contest.find({ status: 'finished', isVisible: true })
@@ -215,9 +221,11 @@ router.get('/past', protect, async (req, res) => {
       .limit(50)
       .lean();
 
+    const userId = req.user ? req.user._id.toString() : null;
+
     const result = contests.map(c => ({
       ...c,
-      isRegistered: c.participants.some(p => p.user.toString() === req.user._id.toString())
+      isRegistered: userId ? c.participants.some(p => (p.user._id || p.user).toString() === userId) : false
     }));
 
     res.json(result);
@@ -230,7 +238,7 @@ router.get('/past', protect, async (req, res) => {
 // ──────────────────────────────────────────────────────
 // GET /:id  — Single contest details
 // ──────────────────────────────────────────────────────
-router.get('/:id', protect, async (req, res) => {
+router.get('/:id', optionalAuth, async (req, res) => {
   try {
     await syncContestStatus();
 
@@ -243,7 +251,7 @@ router.get('/:id', protect, async (req, res) => {
       return res.status(404).json({ message: 'Contest not found' });
     }
 
-    const userData = contest.getUserData(req.user._id);
+    const userData = req.user ? contest.getUserData(req.user._id) : null;
 
     res.json({
       ...contest.toObject(),
@@ -363,23 +371,36 @@ router.post('/:id/submit', protect, async (req, res) => {
       return res.status(404).json({ message: 'Contest not found' });
     }
 
-    if (contest.status !== 'running') {
-      return res.status(400).json({ message: 'Contest is not running. Time is up!' });
-    }
-
-    // Check if endTime has passed (double-check)
-    if (new Date() >= contest.endTime) {
-      contest.status = 'finished';
-      await contest.save();
-      return res.status(400).json({ message: 'Contest time has ended' });
-    }
-
     const participant = contest.participants.find(
       p => (p.user._id || p.user).toString() === req.user._id.toString()
     );
 
     if (!participant) {
       return res.status(400).json({ message: 'You must register first' });
+    }
+
+    const isVirtual = !!participant.isVirtual;
+
+    if (isVirtual) {
+      if (participant.endedAt) {
+        return res.status(400).json({ message: 'Your virtual contest has ended' });
+      }
+      const personalEndTime = new Date(new Date(participant.startedAt).getTime() + contest.duration * 60000);
+      if (new Date() >= personalEndTime) {
+        participant.endedAt = personalEndTime;
+        await contest.save();
+        return res.status(400).json({ message: 'Your virtual contest time has expired' });
+      }
+    } else {
+      if (contest.status !== 'running') {
+        return res.status(400).json({ message: 'Contest is not running. Time is up!' });
+      }
+
+      if (new Date() >= contest.endTime) {
+        contest.status = 'finished';
+        await contest.save();
+        return res.status(400).json({ message: 'Contest time has ended' });
+      }
     }
 
     if (!participant.startedAt) {
@@ -420,8 +441,10 @@ router.post('/:id/submit', protect, async (req, res) => {
       status = executionResult.status.toLowerCase();
     }
 
-    // Calculate penalty: time from contest start (not user start) — LeetCode-style
-    const timeSinceContestStart = (new Date() - new Date(contest.startTime)) / (1000 * 60);
+    // Calculate penalty: time from contest start (or user's virtual start)
+    const timeSinceContestStart = isVirtual
+      ? (new Date() - new Date(participant.startedAt)) / (1000 * 60)
+      : (new Date() - new Date(contest.startTime)) / (1000 * 60);
 
     // Check if already solved
     const alreadySolved = participant.submissions.some(
@@ -510,23 +533,135 @@ router.post('/:id/submit', protect, async (req, res) => {
 
 // ──────────────────────────────────────────────────────
 // GET /:id/leaderboard
+// Enhanced: returns per-problem details, pagination, AK count
 // ──────────────────────────────────────────────────────
-router.get('/:id/leaderboard', protect, async (req, res) => {
+router.get('/:id/leaderboard', optionalAuth, async (req, res) => {
   try {
     await syncContestStatus();
     const contest = await Contest.findById(req.params.id)
-      .populate('participants.user', 'username email');
+      .populate('participants.user', 'username email')
+      .populate('problems.problem', 'title difficulty');
 
     if (!contest) {
       return res.status(404).json({ message: 'Contest not found' });
     }
 
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 25;
+    const detailed = req.query.detailed === 'true';
+
     const leaderboard = contest.calculateLeaderboard();
-    res.json(leaderboard);
+
+    const totalProblems = contest.problems.length;
+    const akCount = leaderboard.filter(p => p.problemsSolved === totalProblems).length;
+
+    if (!detailed) {
+      const paginated = leaderboard.slice((page - 1) * limit, page * limit);
+      return res.json(paginated);
+    }
+
+    const contestStartTime = new Date(contest.startTime);
+
+    const enriched = leaderboard.map((p, idx) => {
+      const rank = idx + 1;
+
+      const problemDetails = contest.problems.map(cp => {
+        const problemId = (cp.problem._id || cp.problem).toString();
+
+        const allSubs = (p.submissions || []).filter(
+          s => (s.problem?._id || s.problem)?.toString() === problemId
+        );
+
+        const accepted = allSubs.find(s => s.status === 'accepted');
+        const wrongAttempts = allSubs.filter(s => s.status !== 'accepted').length;
+
+        if (accepted) {
+          const subTime = new Date(accepted.submittedAt);
+          const participantStart = p.startedAt ? new Date(p.startedAt) : contestStartTime;
+          const elapsedMs = subTime - participantStart;
+          const elapsedStr = formatElapsed(elapsedMs);
+
+          return {
+            status: 'accepted',
+            time: elapsedStr,
+            elapsedMs,
+            language: accepted.language || 'cpp',
+            code: accepted.code || '',
+            wrongAttempts,
+          };
+        }
+
+        if (wrongAttempts > 0) {
+          return {
+            status: 'attempted',
+            wrongAttempts,
+          };
+        }
+
+        return { status: 'unattempted' };
+      });
+
+      let finishTimeMs = 0;
+      const participantStart = p.startedAt ? new Date(p.startedAt) : contestStartTime;
+      let lastAcceptedMs = 0;
+
+      problemDetails.forEach(pd => {
+        if (pd.status === 'accepted') {
+          if (pd.elapsedMs > lastAcceptedMs) {
+            lastAcceptedMs = pd.elapsedMs;
+          }
+          finishTimeMs += pd.wrongAttempts * 5 * 60 * 1000;
+        }
+      });
+      finishTimeMs += lastAcceptedMs;
+
+      return {
+        rank,
+        user: p.user,
+        username: p.username,
+        totalScore: p.totalScore,
+        problemsSolved: p.problemsSolved,
+        finishTime: formatElapsed(finishTimeMs),
+        finishTimeMs,
+        problems: problemDetails,
+      };
+    });
+
+    const paginated = enriched.slice((page - 1) * limit, page * limit);
+
+    res.json({
+      rankings: paginated,
+      meta: {
+        contestTitle: contest.title,
+        contestType: contest.type,
+        status: contest.status,
+        totalParticipants: leaderboard.length,
+        akCount,
+        totalProblems,
+        problems: contest.problems.map(cp => ({
+          id: (cp.problem._id || cp.problem).toString(),
+          title: cp.problem?.title || 'Problem',
+          points: cp.points >= 100 ? Math.round(cp.points / 100) : cp.points,
+          difficulty: cp.problem?.difficulty,
+        })),
+        page,
+        limit,
+        totalPages: Math.ceil(leaderboard.length / limit),
+      }
+    });
   } catch (error) {
     console.error('Get leaderboard error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+function formatElapsed(ms) {
+  if (!ms || ms <= 0) return '00:00:00';
+  const totalSeconds = Math.floor(ms / 1000);
+  const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+  const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+  const s = String(totalSeconds % 60).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
 
 export default router;

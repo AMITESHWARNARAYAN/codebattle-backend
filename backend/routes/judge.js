@@ -1,6 +1,6 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { protect } from '../middleware/auth.js';
+import { protect, optionalAuth } from '../middleware/auth.js';
 import { executeCode as executeCodeWithJudge0 } from '../utils/codeExecutor.js';
 import Problem from '../models/Problem.js';
 import Submission from '../models/Submission.js';
@@ -31,8 +31,8 @@ const authRunLimiter = rateLimit({
 
 // @route   POST /api/judge/submit
 // @desc    Submit code for execution and evaluation
-// @access  Private
-router.post('/submit', protect, authRunLimiter, async (req, res) => {
+// @access  Public / Optional Auth
+router.post('/submit', optionalAuth, authRunLimiter, async (req, res) => {
   try {
     const { problemId, code, language } = req.body;
 
@@ -55,14 +55,16 @@ router.post('/submit', protect, authRunLimiter, async (req, res) => {
     }
 
     // Submission cooldown: reject if user submitted this problem within the last 5 seconds
-    const COOLDOWN_MS = 5000;
-    const recentSubmission = await Submission.findOne({
-      user: req.user._id,
-      problem: problemId,
-      submittedAt: { $gt: new Date(Date.now() - COOLDOWN_MS) }
-    });
-    if (recentSubmission) {
-      return res.status(429).json({ message: 'Please wait a few seconds before submitting again.' });
+    if (req.user) {
+      const COOLDOWN_MS = 5000;
+      const recentSubmission = await Submission.findOne({
+        user: req.user._id,
+        problem: problemId,
+        submittedAt: { $gt: new Date(Date.now() - COOLDOWN_MS) }
+      });
+      if (recentSubmission) {
+        return res.status(429).json({ message: 'Please wait a few seconds before submitting again.' });
+      }
     }
 
     // Get problem with test cases
@@ -89,22 +91,27 @@ router.post('/submit', protect, authRunLimiter, async (req, res) => {
       finalStatus = 'Accepted';
     }
 
-    // Create submission record
-    const submission = await Submission.create({
-      user: req.user._id,
-      problem: problemId,
-      code,
-      language,
-      status: finalStatus,
-      runtime: executionResult.executionTime,
-      memory: executionResult.memoryUsed,
-      testCasesPassed: executionResult.testCasesPassed,
-      totalTestCases: executionResult.totalTestCases,
-      errorMessage: executionResult.errors.join('\n') || ''
-    });
+    let submissionId = null;
+
+    // Create submission record only if user is logged in
+    if (req.user) {
+      const submission = await Submission.create({
+        user: req.user._id,
+        problem: problemId,
+        code,
+        language,
+        status: finalStatus,
+        runtime: executionResult.executionTime,
+        memory: executionResult.memoryUsed,
+        testCasesPassed: executionResult.testCasesPassed,
+        totalTestCases: executionResult.totalTestCases,
+        errorMessage: executionResult.errors.join('\n') || ''
+      });
+      submissionId = submission._id;
+    }
 
     // Update user solved stats on first Accepted — atomic to prevent race conditions
-    if (finalStatus === 'Accepted') {
+    if (req.user && finalStatus === 'Accepted') {
       try {
         // Build difficulty-specific increment
         const difficultyInc = {};
@@ -205,7 +212,7 @@ router.post('/submit', protect, authRunLimiter, async (req, res) => {
 
     // Return detailed results
     res.json({
-      submissionId: submission._id,
+      submissionId: submissionId,
       status: finalStatus,
       testCasesPassed: executionResult.testCasesPassed,
       totalTestCases: executionResult.totalTestCases,
@@ -280,8 +287,8 @@ router.post('/run-public', publicRunLimiter, async (req, res) => {
 
 // @route   POST /api/judge/run
 // @desc    Run code with specific test case or custom input
-// @access  Private
-router.post('/run', protect, authRunLimiter, async (req, res) => {
+// @access  Public / Optional Auth
+router.post('/run', optionalAuth, authRunLimiter, async (req, res) => {
   try {
     const { code, language, input, problemId, testCaseIndex } = req.body;
 
@@ -369,8 +376,8 @@ router.post('/run', protect, authRunLimiter, async (req, res) => {
 
 // @route   GET /api/judge/languages
 // @desc    Get supported languages
-// @access  Private
-router.get('/languages', protect, async (req, res) => {
+// @access  Public / Optional Auth
+router.get('/languages', optionalAuth, async (req, res) => {
   try {
     const languages = [
       { id: 'javascript', name: 'JavaScript (Node.js)', extension: 'js' },
@@ -396,8 +403,8 @@ router.get('/languages', protect, async (req, res) => {
 
 // @route   GET /api/judge/hints/:problemId
 // @desc    Get hints for a problem
-// @access  Private
-router.get('/hints/:problemId', protect, async (req, res) => {
+// @access  Public / Optional Auth
+router.get('/hints/:problemId', optionalAuth, async (req, res) => {
   try {
     const { problemId } = req.params;
 
@@ -428,8 +435,8 @@ router.get('/hints/:problemId', protect, async (req, res) => {
 
 // @route   POST /api/judge/run-batch
 // @desc    Run code against visible (public) test cases and custom cases — LeetCode "Run" behavior
-// @access  Private
-router.post('/run-batch', protect, authRunLimiter, async (req, res) => {
+// @access  Public / Optional Auth
+router.post('/run-batch', optionalAuth, authRunLimiter, async (req, res) => {
   try {
     const { code, language, problemId, customCases } = req.body;
     if (!code || !code.trim() || code.trim().length < 5) return res.status(400).json({ message: 'Code too short' });

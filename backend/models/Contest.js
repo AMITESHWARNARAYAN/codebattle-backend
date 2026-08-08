@@ -46,7 +46,12 @@ const contestParticipantSchema = new mongoose.Schema({
   rank: Number,
   ratingChange: Number,
   oldContestRating: Number,
-  newContestRating: Number
+  newContestRating: Number,
+  isVirtual: {
+    type: Boolean,
+    default: false
+  },
+  endedAt: Date
 });
 
 const contestSchema = new mongoose.Schema({

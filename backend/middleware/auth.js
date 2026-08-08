@@ -96,6 +96,25 @@ export const protect = async (req, res, next) => {
   }
 };
 
+// Optional auth — attaches req.user if valid token provided, but does not block guests
+export const optionalAuth = async (req, res, next) => {
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+    try {
+      const token = req.headers.authorization.split(' ')[1];
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      let user = getCachedUser(decoded.id);
+      if (!user) {
+        user = await User.findById(decoded.id).select('-password -solvedProblems -matchHistory');
+        if (user) setCachedUser(decoded.id, user);
+      }
+      if (user) req.user = user;
+    } catch (e) {
+      // Ignore token errors for guest requests
+    }
+  }
+  next();
+};
+
 // Admin middleware
 export const isAdmin = (req, res, next) => {
   if (req.user && req.user.isAdmin) {
