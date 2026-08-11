@@ -93,21 +93,23 @@ async function finalizeContestRatings(contest) {
 async function syncContestStatus(filter = {}) {
   const now = new Date();
 
-  // Upcoming → Running  (startTime has passed, endTime hasn't)
+  // 1. Upcoming → Running  (startTime has passed, endTime hasn't)
   await Contest.updateMany(
     { status: 'upcoming', startTime: { $lte: now }, endTime: { $gt: now }, ...filter },
     { $set: { status: 'running' } }
   );
 
-  // Running → Finished  (endTime has passed)
-  // Find contests about to be finalized so we can trigger rating calc
+  // 2. Upcoming OR Running → Finished  (endTime has passed)
+  // This catches both running contests that ended AND upcoming contests whose end time passed
+  // (e.g. 0 registered users, or offline backend when contest was scheduled to run)
   const justFinished = await Contest.find(
-    { status: 'running', endTime: { $lte: now }, ...filter }
+    { status: { $in: ['upcoming', 'running'] }, endTime: { $lte: now }, ...filter }
   );
 
   if (justFinished.length > 0) {
+    const finishedIds = justFinished.map(c => c._id);
     await Contest.updateMany(
-      { status: 'running', endTime: { $lte: now }, ...filter },
+      { _id: { $in: finishedIds } },
       { $set: { status: 'finished' } }
     );
 

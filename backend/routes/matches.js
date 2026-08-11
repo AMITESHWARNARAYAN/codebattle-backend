@@ -588,6 +588,16 @@ router.post('/:matchId/submit', protect, async (req, res) => {
             `You lost to ${player1.username}. Rating: ${ratingChanges.player2.change >= 0 ? '+' : ''}${ratingChanges.player2.change}`,
             `/results/${lockedMatch._id}`
           );
+
+          // Emit match-completed to match room
+          const io = getIO();
+          if (io) {
+            io.to(`match-${lockedMatch._id.toString()}`).emit('match-completed', {
+              matchId: lockedMatch._id.toString(),
+              winnerId: lockedMatch.winner ? lockedMatch.winner.toString() : null,
+              match: lockedMatch
+            });
+          }
         }
       }
     }
@@ -717,7 +727,15 @@ router.post('/:matchId/giveup', protect, async (req, res) => {
       io.to(`match-${match._id.toString()}`).emit('opponent-gave-up', {
         matchId: match._id.toString(),
         userId: req.user._id.toString(),
-        username: req.user.username
+        username: req.user.username,
+        winnerId: winnerId.toString(),
+        match: match
+      });
+      io.to(`match-${match._id.toString()}`).emit('match-completed', {
+        matchId: match._id.toString(),
+        winnerId: winnerId.toString(),
+        reason: 'opponent-gave-up',
+        match: match
       });
     }
 
